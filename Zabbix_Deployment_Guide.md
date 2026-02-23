@@ -522,7 +522,7 @@ sed -i 's/^user = apache/user = nginx/' /etc/php-fpm.d/zabbix.conf
 sed -i 's/^group = apache/group = nginx/' /etc/php-fpm.d/zabbix.conf
 
 # Configure Nginx listener in /etc/nginx/conf.d/zabbix.conf
-# Uncomment and set: listen 8080; server_name zabbix.example.com;
+# Uncomment and set: listen 80; server_name zabbix.example.com;
 ```
 
 ---
@@ -1528,7 +1528,7 @@ helm install zabbix zabbix-chart-7.2/zabbix-helm-chrt \
 zabbixProxy:
   enabled: true
   env:
-    ZBX_SERVER_HOST: "proxy-siteA-01"    # External Zabbix server/proxy address
+    ZBX_SERVER_HOST: "zabbix-node-siteA;zabbix-node-siteB"  # Zabbix server HA nodes (proxies cannot chain to other proxies)
     ZBX_PROXYMODE: 0                      # Active mode
     ZBX_CACHESIZE: "256M"                 # Increase for large clusters
 
@@ -2142,6 +2142,7 @@ etcdctl snapshot status /var/lib/etcd/backup/etcd-snapshot-$(date +%Y%m%d).db -w
 ```cron
 # /etc/cron.d/etcd-backup
 # Daily etcd snapshot at 02:00, retain 7 days
+# For Option A (RPM): replace /usr/local/bin/etcdctl with /usr/bin/etcdctl
 0 2 * * * etcd /usr/local/bin/etcdctl snapshot save /var/lib/etcd/backup/etcd-snapshot-$(date +\%Y\%m\%d).db --endpoints=https://127.0.0.1:2379 --cacert=/etc/etcd/pki/ca.crt --cert=/etc/etcd/pki/server.crt --key=/etc/etcd/pki/server.key 2>&1 | logger -t etcd-backup
 0 3 * * * etcd find /var/lib/etcd/backup/ -name "etcd-snapshot-*.db" -mtime +7 -delete
 ```
@@ -2377,14 +2378,12 @@ Zabbix server, proxy, and agent logs can grow unbounded. Configure logrotate on 
 /var/log/zabbix/zabbix_server.log {
     weekly
     rotate 12
+    copytruncate
     compress
     delaycompress
     missingok
     notifempty
     create 0640 zabbix zabbix
-    postrotate
-        /usr/bin/zabbix_server -R log_level_increase= 2>/dev/null || true
-    endscript
 }
 ```
 
