@@ -203,16 +203,17 @@ This is the concrete bill of materials. Each site deploys the following VMs (ass
 | Zabbix Frontend (Nginx + PHP-FPM) | 2 | 4 GB | 20 GB | 1 | Web UI |
 | KEMP LoadMaster VLM | 2 | 4 GB | 32 GB | 2 | HA pair (active/passive) |
 | Zabbix Proxy | 4 | 8 GB | 50 GB | 2 | Proxy group members |
-| **Site Total** | **32-34** | **96-100 GB** | **~804 GB** | **8-9** | |
+| SNMP Trap Proxy (standalone) | 2 | 4 GB | 20 GB | 1 | SNMP trap receiver (not in proxy group) |
+| **Site Total** | **34-36** | **100-104 GB** | **~824 GB** | **9-10** | |
 
 **Combined totals (both sites + arbitrator):**
 
 | Resource | Total |
 |----------|-------|
-| VMs | 17-19 (8-9 per site + 1 etcd arbitrator) |
-| vCPU | 66-70 |
-| RAM | 196-204 GB |
-| Storage | ~1.6 TB (SSD/NVMe for database VMs) |
+| VMs | 19-21 (9-10 per site + 1 etcd arbitrator) |
+| vCPU | 70-74 |
+| RAM | 204-212 GB |
+| Storage | ~1.7 TB (SSD/NVMe for database VMs) |
 
 > **Note:** Scale these values using the sizing tiers in the tables above. For Large (2K-10K hosts), double the server and database VM specs. The KEMP, etcd, and frontend VMs remain the same across tiers.
 
@@ -639,7 +640,7 @@ User=etcd
 Group=etcd
 Type=notify
 Environment="ETCD_CONFIG_FILE=/etc/etcd/etcd.conf.yml"
-ExecStart=/usr/local/bin/etcd
+ExecStart=/usr/local/bin/etcd        # Option B (binary). For Option A (RPM): /usr/bin/etcd
 Restart=always
 RestartSec=10s
 LimitNOFILE=40000
@@ -729,6 +730,10 @@ restapi:
 
 etcd3:
   hosts: 10.1.1.30:2379,10.2.1.30:2379,10.1.1.31:2379
+  protocol: https
+  cacert: /etc/patroni/pki/ca.crt
+  username: patroni
+  password: '<secret>'
 
 bootstrap:
   dcs:
@@ -752,6 +757,7 @@ bootstrap:
 postgresql:
   listen: 0.0.0.0:5432
   connect_address: 10.1.1.20:5432
+  bin_dir: /usr/pgsql-16/bin
   data_dir: /var/lib/pgsql/16/data
   authentication:
     replication:
@@ -2115,6 +2121,10 @@ sudo -iu postgres pgbackrest --stanza=zabbix-cluster verify   # Check integrity
 etcd stores Patroni cluster state (leader key, cluster config, member info). While etcd data can be rebuilt by restarting Patroni, having a snapshot accelerates recovery and preserves custom DCS configuration.
 
 ```bash
+# Create backup directory (run once on each etcd node)
+mkdir -p /var/lib/etcd/backup
+chown etcd:etcd /var/lib/etcd/backup
+
 # Take a snapshot (run on any healthy etcd node)
 export ETCDCTL_API=3
 etcdctl snapshot save /var/lib/etcd/backup/etcd-snapshot-$(date +%Y%m%d).db \
