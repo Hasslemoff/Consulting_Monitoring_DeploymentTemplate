@@ -60,6 +60,16 @@ php_value[max_input_vars] = 10000
 
 > **Important:** The default Zabbix PHP-FPM pool runs as `apache:apache`. Since we use Nginx, change `user` and `group` to `nginx`. If this is not changed, Nginx will receive "Permission denied" errors when connecting to the PHP-FPM socket.
 
+Add session security hardening:
+
+```bash
+# Session security hardening
+echo 'php_value[session.cookie_secure] = On' >> /etc/php-fpm.d/zabbix.conf
+echo 'php_value[session.cookie_httponly] = On' >> /etc/php-fpm.d/zabbix.conf
+echo 'php_value[session.cookie_samesite] = Strict' >> /etc/php-fpm.d/zabbix.conf
+echo 'php_value[session.use_strict_mode] = 1' >> /etc/php-fpm.d/zabbix.conf
+```
+
 Ensure the session directory exists and has correct ownership:
 
 ```bash
@@ -89,9 +99,19 @@ server {
     listen          80;
     server_name     {{FQDN_FRONTEND}};
 
+    server_tokens off;
+
     root    /usr/share/zabbix;
 
     index   index.php;
+
+    # Security headers
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    client_max_body_size 16M;
 
     location = /favicon.ico {
         log_not_found   off;
@@ -184,7 +204,7 @@ sudo vi /etc/zabbix/web/zabbix.conf.php
 
 $DB['TYPE']                     = 'POSTGRESQL';
 $DB['SERVER']                   = '{{VIP_DB_A}}';
-$DB['PORT']                     = '5432';
+$DB['PORT']                     = '{{DB_PORT}}';
 $DB['DATABASE']                 = 'zabbix';
 $DB['USER']                     = 'zabbix';
 $DB['PASSWORD']                 = '{{DB_ZABBIX_PASSWORD}}';
@@ -193,6 +213,7 @@ $DB['PASSWORD']                 = '{{DB_ZABBIX_PASSWORD}}';
 $DB['SCHEMA']                   = '';
 
 // Used for TLS connection to the database.
+// If PostgreSQL SSL is enabled (Phase 04), set to true and populate paths below
 $DB['ENCRYPTION']               = false;
 $DB['KEY_FILE']                 = '';
 $DB['CERT_FILE']                = '';
@@ -242,13 +263,14 @@ Edit the Zabbix web configuration on `{{FRONTEND_B_IP}}`.
 
 $DB['TYPE']                     = 'POSTGRESQL';
 $DB['SERVER']                   = '{{VIP_DB_B}}';
-$DB['PORT']                     = '5432';
+$DB['PORT']                     = '{{DB_PORT}}';
 $DB['DATABASE']                 = 'zabbix';
 $DB['USER']                     = 'zabbix';
 $DB['PASSWORD']                 = '{{DB_ZABBIX_PASSWORD}}';
 
 $DB['SCHEMA']                   = '';
 
+// If PostgreSQL SSL is enabled (Phase 04), set to true and populate paths below
 $DB['ENCRYPTION']               = false;
 $DB['KEY_FILE']                 = '';
 $DB['CERT_FILE']                = '';

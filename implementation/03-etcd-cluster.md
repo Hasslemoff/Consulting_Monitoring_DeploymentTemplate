@@ -242,6 +242,8 @@ On each node, verify the server certificate contains the correct SAN entries:
 openssl x509 -in /etc/etcd/pki/server.crt -text -noout | grep -A1 "Subject Alternative Name"
 ```
 
+> **IMPORTANT -- Secure the CA private key:** After all node certificates have been generated and deployed, move `ca.key` to an offline secure location (e.g., hardware security module, encrypted USB in a safe, or secrets vault). The CA key can sign new certificates trusted by the entire etcd cluster. Do **not** leave it on any networked system.
+
 ---
 
 ## Step 4 — Configure etcd-1
@@ -275,7 +277,7 @@ client-transport-security:
   cert-file: /etc/etcd/pki/server.crt
   key-file: /etc/etcd/pki/server.key
   trusted-ca-file: /etc/etcd/pki/ca.crt
-  client-cert-auth: false
+  client-cert-auth: true
 
 # TLS: Peer
 peer-transport-security:
@@ -284,6 +286,8 @@ peer-transport-security:
   trusted-ca-file: /etc/etcd/pki/ca.crt
   client-cert-auth: true
 ```
+
+> **Security:** `client-cert-auth: true` requires all clients (including Patroni) to present a valid TLS client certificate. This provides defense-in-depth beyond password authentication. Patroni's etcd3 connection must include `cert` and `key` parameters pointing to a client certificate signed by the same CA.
 
 Set ownership:
 
@@ -325,7 +329,7 @@ client-transport-security:
   cert-file: /etc/etcd/pki/server.crt
   key-file: /etc/etcd/pki/server.key
   trusted-ca-file: /etc/etcd/pki/ca.crt
-  client-cert-auth: false
+  client-cert-auth: true
 
 # TLS: Peer
 peer-transport-security:
@@ -375,7 +379,7 @@ client-transport-security:
   cert-file: /etc/etcd/pki/server.crt
   key-file: /etc/etcd/pki/server.key
   trusted-ca-file: /etc/etcd/pki/ca.crt
-  client-cert-auth: false
+  client-cert-auth: true
 
 # TLS: Peer
 peer-transport-security:
@@ -580,6 +584,8 @@ etcdctl --endpoints=https://{{ETCD_1_IP}}:2379 --cacert=/etc/etcd/pki/ca.crt \
   --user patroni:{{ETCD_PATRONI_PASSWORD}} \
   del /service/test
 ```
+
+> **Note:** Avoid passing passwords on the command line in production. Use `export ETCDCTL_USER=patroni:$(cat /path/to/patroni-password-file)` or `ETCDCTL_USER` environment variable instead. The inline form is shown here for clarity.
 
 ---
 

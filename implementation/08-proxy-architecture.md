@@ -59,7 +59,7 @@ Generate a unique PSK (Pre-Shared Key) for each proxy. PSK encryption secures al
 **On each proxy VM**, run:
 
 ```bash
-sudo openssl rand -hex 32 > /etc/zabbix/proxy.psk
+openssl rand -hex 32 | sudo tee /etc/zabbix/proxy.psk > /dev/null
 ```
 
 Set restrictive permissions:
@@ -241,6 +241,15 @@ outputOption fts
 traphandle default /usr/sbin/zabbix_trap_receiver.pl
 ```
 
+> **Note:** The engine ID must be unique per SNMP trap proxy. Generate a unique value for each: `snmpd -e` or use a hex-encoded string of your choosing. Do NOT use the example value `0x0102030405` in production.
+
+Set restrictive permissions on the snmptrapd configuration:
+
+```bash
+sudo chmod 600 /etc/snmp/snmptrapd.conf
+sudo chown root:root /etc/snmp/snmptrapd.conf
+```
+
 Create the Zabbix SNMP trap receiver script log directory:
 
 ```bash
@@ -316,6 +325,8 @@ sudo chown root:zabbix /etc/zabbix/proxy.psk
 sudo mkdir -p /var/lib/zabbix
 sudo chown zabbix:zabbix /var/lib/zabbix
 ```
+
+> **Security:** While Zabbix Agent 2 denies `system.run[*]` by default, add `DenyKey=system.run[*]` explicitly in agent configurations for defense-in-depth.
 
 ---
 
@@ -647,7 +658,7 @@ Set SNMPv3 credentials as global macros so they can be referenced across all SNM
 
 4. Regenerate the PSK if corrupted:
    ```bash
-   sudo openssl rand -hex 32 > /etc/zabbix/proxy.psk
+   openssl rand -hex 32 | sudo tee /etc/zabbix/proxy.psk > /dev/null
    sudo chmod 640 /etc/zabbix/proxy.psk
    sudo chown root:zabbix /etc/zabbix/proxy.psk
    ```

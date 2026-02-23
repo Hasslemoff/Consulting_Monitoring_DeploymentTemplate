@@ -344,6 +344,8 @@ Navigate to **Virtual Services > Add New > Standard Virtual Service**.
 - KEMP marks the primary as "Up" and the standby as "Down"
 - During a Patroni failover, the new primary starts responding 200 and the old primary stops — KEMP automatically routes to the new primary
 
+> **Note:** If Patroni REST API authentication is enabled (Phase 04), configure the KEMP health check to include Basic Auth credentials. In the KEMP WUI: set the health check **Username** to `patroni_api` and **Password** to `{{PATRONI_API_PASSWORD}}`.
+
 Click **Save** to create the Virtual Service.
 
 ### Site B Configuration
@@ -366,7 +368,7 @@ On each site's **active** KEMP unit:
 1. Navigate to **System Configuration > Miscellaneous Options**
 2. Locate **Remote Access** (API Access)
 3. Set **Enable API Interface** to `Yes`
-4. Optionally restrict API access by source IP:
+4. Restrict API access by source IP to the management network:
    - Add `{{ZBX_SERVER_A_IP}}` and `{{ZBX_SERVER_B_IP}}` to the allowed list
 5. Click **Save**
 
@@ -383,6 +385,12 @@ Run these verification commands from a management workstation or the Zabbix serv
 ```bash
 curl -k -s "https://bal:{{KEMP_ADMIN_PASSWORD}}@{{KEMP_A1_IP}}:8443/access/listvs" | xmllint --format -
 ```
+
+> **Security note:** The curl commands above embed credentials in the URL for clarity. In production, use environment variables to avoid shell history exposure:
+> ```bash
+> export KEMP_PASS='{{KEMP_ADMIN_PASSWORD}}'
+> curl -k -s -u "bal:${KEMP_PASS}" "https://{{KEMP_A1_IP}}:8443/access/listvs"
+> ```
 
 **Check HA status:**
 

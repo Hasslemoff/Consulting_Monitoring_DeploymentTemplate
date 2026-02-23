@@ -34,7 +34,7 @@ NodeAddress={{ZBX_SERVER_A_IP}}:10051
 
 ### Database Connection ###
 DBHost={{VIP_DB_A}}
-DBPort=5432
+DBPort={{DB_PORT}}
 DBName=zabbix
 DBUser=zabbix
 DBPassword={{DB_ZABBIX_PASSWORD}}
@@ -49,7 +49,14 @@ SocketDir=/run/zabbix
 
 > **Note on DBHost:** Each node connects to its **local site** KEMP Database VIP. This ensures the shortest network path for database queries. Both VIPs route to the same Patroni primary, so data consistency is guaranteed.
 
-> **Note on DBPort:** If PgBouncer is deployed in front of PostgreSQL (configured in Phase 4), set `DBPort=6432` instead of `5432`.
+> **Note:** Set `{{DB_PORT}}` to `5432` for direct PostgreSQL or `6432` if using PgBouncer (Phase 04).
+
+Set restrictive file permissions:
+
+```bash
+sudo chmod 640 /etc/zabbix/zabbix_server.conf
+sudo chown root:zabbix /etc/zabbix/zabbix_server.conf
+```
 
 ---
 
@@ -64,7 +71,7 @@ NodeAddress={{ZBX_SERVER_B_IP}}:10051
 
 ### Database Connection ###
 DBHost={{VIP_DB_B}}
-DBPort=5432
+DBPort={{DB_PORT}}
 DBName=zabbix
 DBUser=zabbix
 DBPassword={{DB_ZABBIX_PASSWORD}}
@@ -78,6 +85,13 @@ SocketDir=/run/zabbix
 ```
 
 > **Critical:** The `HANodeName` must be unique across all nodes. If two nodes register with the same name, the second node will fail to start and log a duplicate node error.
+
+Set restrictive file permissions:
+
+```bash
+sudo chmod 640 /etc/zabbix/zabbix_server.conf
+sudo chown root:zabbix /etc/zabbix/zabbix_server.conf
+```
 
 ---
 
@@ -95,6 +109,7 @@ Add the performance tuning parameters to **both** nodes' configuration files. Se
 | `StartPingers` | 2 | 5 | 10 | 15 |
 | `StartDiscoverers` | 2 | 5 | 10 | 15 |
 | `StartHTTPPollers` | 2 | 5 | 10 | 15 |
+| `StartDBSyncers` | 4 | 4 | 8 | 16 |
 | `StartPreprocessors` | 5 | 15 | 30 | 50 |
 | `StartHistoryPollers` | 5 | 10 | 25 | 50 |
 | `CacheSize` | 64M | 256M | 512M | 1G |
@@ -124,6 +139,9 @@ StartTrappers=10
 StartPingers=5
 StartDiscoverers=5
 StartHTTPPollers=5
+
+# DB Syncers
+StartDBSyncers=8
 
 # Preprocessing
 StartPreprocessors=15
@@ -161,16 +179,9 @@ StartLLDProcessors=5
 
 The failover delay determines how long a standby node waits before promoting itself to active when it detects the current active node is unresponsive.
 
-Add the following to `/etc/zabbix/zabbix_server.conf` on **both** nodes:
+The failover delay is configured via runtime command after the server starts (Step 9), not in the configuration file. The default is **60 seconds**. We recommend **30 seconds** for production.
 
-```ini
-### HA Failover ###
-# Minimum: 10s, Maximum: 15m, Recommended: 30s
-# Lower values = faster failover but higher risk of split-brain during network blips
-HANodeName=zabbix-node-siteA
-```
-
-> **Note:** The failover delay is set via a runtime command after the cluster is started (see Step 9). It is stored in the database and applies cluster-wide. You do not need to set it in the configuration file.
+Proceed to Step 5 to start the servers.
 
 ---
 
@@ -382,6 +393,8 @@ The failover delay is stored in the database and applies to the entire cluster. 
    ```bash
    PGPASSWORD='{{DB_ZABBIX_PASSWORD}}' psql -h {{VIP_DB_A}} -U zabbix -d zabbix -c "SELECT 1;"
    ```
+
+> **Note:** Use a `.pgpass` file instead of inline `PGPASSWORD` in production to avoid shell history exposure.
 
 ### Duplicate HANodeName Error
 

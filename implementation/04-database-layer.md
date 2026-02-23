@@ -69,6 +69,9 @@ name: pg-siteA
 restapi:
   listen: 0.0.0.0:8008
   connect_address: {{PG_A_IP}}:8008
+  authentication:
+    username: patroni_api
+    password: '{{PATRONI_API_PASSWORD}}'
 
 etcd3:
   hosts: {{ETCD_1_IP}}:2379,{{ETCD_2_IP}}:2379,{{ETCD_3_IP}}:2379
@@ -98,24 +101,28 @@ bootstrap:
         # WAL / Replication
         wal_level: replica
         max_wal_senders: 5
-        max_wal_senders: 5
         max_replication_slots: 5
         wal_keep_size: 2GB
         # TimescaleDB
         shared_preload_libraries: timescaledb
+        # SSL
+        ssl: on
+        ssl_cert_file: /etc/patroni/pki/server.crt
+        ssl_key_file: /etc/patroni/pki/server.key
+        ssl_ca_file: /etc/patroni/pki/ca.crt
         # Logging
         log_min_duration_statement: 1000
         log_checkpoints: 'on'
         log_lock_waits: 'on'
       pg_hba:
         - local   all             postgres                          peer
-        - local   all             all                               md5
-        - host    all             zabbix      {{SITE_A_SUBNET}}     md5
-        - host    all             zabbix      {{SITE_B_SUBNET}}     md5
-        - host    all             zabbix      127.0.0.1/32          md5
-        - host    replication     replicator  {{PG_A_IP}}/32        md5
-        - host    replication     replicator  {{PG_B_IP}}/32        md5
-        - host    all             all         127.0.0.1/32          md5
+        - local   all             all                               scram-sha-256
+        - host    all             zabbix      {{SITE_A_SUBNET}}     scram-sha-256
+        - host    all             zabbix      {{SITE_B_SUBNET}}     scram-sha-256
+        - host    all             zabbix      127.0.0.1/32          scram-sha-256
+        - hostssl replication     replicator  {{PG_A_IP}}/32        scram-sha-256
+        - hostssl replication     replicator  {{PG_B_IP}}/32        scram-sha-256
+        - host    all             all         127.0.0.1/32          scram-sha-256
 
 postgresql:
   listen: 0.0.0.0:5432
@@ -155,6 +162,9 @@ name: pg-siteB
 restapi:
   listen: 0.0.0.0:8008
   connect_address: {{PG_B_IP}}:8008
+  authentication:
+    username: patroni_api
+    password: '{{PATRONI_API_PASSWORD}}'
 
 etcd3:
   hosts: {{ETCD_1_IP}}:2379,{{ETCD_2_IP}}:2379,{{ETCD_3_IP}}:2379
@@ -184,18 +194,22 @@ bootstrap:
         max_replication_slots: 5
         wal_keep_size: 2GB
         shared_preload_libraries: timescaledb
+        ssl: on
+        ssl_cert_file: /etc/patroni/pki/server.crt
+        ssl_key_file: /etc/patroni/pki/server.key
+        ssl_ca_file: /etc/patroni/pki/ca.crt
         log_min_duration_statement: 1000
         log_checkpoints: 'on'
         log_lock_waits: 'on'
       pg_hba:
         - local   all             postgres                          peer
-        - local   all             all                               md5
-        - host    all             zabbix      {{SITE_A_SUBNET}}     md5
-        - host    all             zabbix      {{SITE_B_SUBNET}}     md5
-        - host    all             zabbix      127.0.0.1/32          md5
-        - host    replication     replicator  {{PG_A_IP}}/32        md5
-        - host    replication     replicator  {{PG_B_IP}}/32        md5
-        - host    all             all         127.0.0.1/32          md5
+        - local   all             all                               scram-sha-256
+        - host    all             zabbix      {{SITE_A_SUBNET}}     scram-sha-256
+        - host    all             zabbix      {{SITE_B_SUBNET}}     scram-sha-256
+        - host    all             zabbix      127.0.0.1/32          scram-sha-256
+        - hostssl replication     replicator  {{PG_A_IP}}/32        scram-sha-256
+        - hostssl replication     replicator  {{PG_B_IP}}/32        scram-sha-256
+        - host    all             all         127.0.0.1/32          scram-sha-256
 
 postgresql:
   listen: 0.0.0.0:5432
@@ -377,6 +391,8 @@ curl -s -o /dev/null -w "%{http_code}" http://{{PG_B_IP}}:8008/primary
 # Expected: 503
 ```
 
+> **Security hardening:** The Patroni REST API is shown using HTTP for initial setup. For production, enable HTTPS by adding `certfile`, `keyfile`, and `cafile` to the `restapi` section of `patroni.yml`. Update KEMP health checks (Phase 05) to use HTTPS on port 8008 accordingly.
+
 ---
 
 ## Step 8 — TimescaleDB Chunk Tuning
@@ -425,7 +441,7 @@ zabbix = host=127.0.0.1 port=5432 dbname=zabbix
 [pgbouncer]
 listen_addr = 0.0.0.0
 listen_port = 6432
-auth_type = md5
+auth_type = scram-sha-256
 auth_file = /etc/pgbouncer/userlist.txt
 
 ;; Pool mode: transaction is required for Zabbix 7.0+
@@ -450,14 +466,16 @@ log_disconnections = 0
 log_pooler_errors = 1
 
 ;; Admin access (for monitoring PgBouncer itself)
-admin_users = postgres
+admin_users = pgbouncer_admin
 stats_users = postgres,zabbix
 
 ;; Paths
 pidfile = /var/run/pgbouncer/pgbouncer.pid
 logfile = /var/log/pgbouncer/pgbouncer.log
-unix_socket_dir = /tmp
+unix_socket_dir = /var/run/pgbouncer
 ```
+
+> **Note:** PgBouncer 1.21+ is required for SCRAM-SHA-256 authentication support. Verify your installed version with `pgbouncer --version`.
 
 ### 9b. Create PgBouncer Auth File
 

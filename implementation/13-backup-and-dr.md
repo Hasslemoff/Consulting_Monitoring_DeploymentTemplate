@@ -74,15 +74,21 @@ Repeat the NFS mount on the **standby** PostgreSQL node (`pg-siteB`).
 
 #### 2a-2. Create pgBackRest Configuration
 
-Create `/etc/pgbackrest.conf` on **both** PostgreSQL nodes:
+Create `/etc/pgbackrest/pgbackrest.conf` on **both** PostgreSQL nodes:
+
+```bash
+sudo mkdir -p /etc/pgbackrest
+```
 
 ```ini
-# /etc/pgbackrest.conf
+# /etc/pgbackrest/pgbackrest.conf
 
 [global]
 repo1-path={{BACKUP_NFS_MOUNT}}
 repo1-retention-full={{BACKUP_RETENTION_FULL}}
 repo1-retention-diff={{BACKUP_RETENTION_DIFF}}
+repo1-cipher-type=aes-256-cbc
+repo1-cipher-pass={{BACKUP_ENCRYPTION_KEY}}
 
 process-max=4
 start-fast=y
@@ -98,14 +104,20 @@ pg1-path=/var/lib/pgsql/16/data
 pg1-port=5432
 ```
 
+> **Warning:** The encryption key must be stored securely. If lost, backups cannot be restored.
+
 ### Option B — S3 Storage
 
 Use this option if `{{BACKUP_TYPE}}` = `s3`.
 
-Create `/etc/pgbackrest.conf` on **both** PostgreSQL nodes:
+Create `/etc/pgbackrest/pgbackrest.conf` on **both** PostgreSQL nodes:
+
+```bash
+sudo mkdir -p /etc/pgbackrest
+```
 
 ```ini
-# /etc/pgbackrest.conf
+# /etc/pgbackrest/pgbackrest.conf
 
 [global]
 repo1-type=s3
@@ -117,6 +129,8 @@ repo1-s3-region={{BACKUP_S3_REGION}}
 repo1-path=/pgbackrest
 repo1-retention-full={{BACKUP_RETENTION_FULL}}
 repo1-retention-diff={{BACKUP_RETENTION_DIFF}}
+repo1-cipher-type=aes-256-cbc
+repo1-cipher-pass={{BACKUP_ENCRYPTION_KEY}}
 
 process-max=4
 start-fast=y
@@ -132,11 +146,13 @@ pg1-path=/var/lib/pgsql/16/data
 pg1-port=5432
 ```
 
-> **Security:** For S3 credentials, consider using IAM instance roles or environment variables instead of embedding keys in the configuration file. If keys are stored in `/etc/pgbackrest.conf`, ensure the file permissions are `0640` owned by `postgres:postgres`.
+> **Warning:** The encryption key must be stored securely. If lost, backups cannot be restored.
+
+> **Security:** For S3 credentials, consider using IAM instance roles or environment variables instead of embedding keys in the configuration file. If keys are stored in `/etc/pgbackrest/pgbackrest.conf`, ensure the file permissions are `0640` owned by `postgres:postgres`.
 
 ```bash
-chown postgres:postgres /etc/pgbackrest.conf
-chmod 0640 /etc/pgbackrest.conf
+chown postgres:postgres /etc/pgbackrest/pgbackrest.conf
+chmod 0640 /etc/pgbackrest/pgbackrest.conf
 ```
 
 ---
@@ -385,7 +401,7 @@ Back up all configuration files that are not stored in the database. These are r
 | `/usr/lib/zabbix/alertscripts/` | Zabbix Servers | Custom alert scripts (Teams, Slack, PagerDuty) |
 | `/usr/lib/zabbix/externalscripts/` | Zabbix Servers | External check scripts |
 | `/etc/patroni/` | PostgreSQL nodes | Patroni cluster configuration |
-| `/etc/pgbackrest.conf` | PostgreSQL nodes | pgBackRest configuration |
+| `/etc/pgbackrest/pgbackrest.conf` | PostgreSQL nodes | pgBackRest configuration |
 | `/etc/etcd/` | etcd nodes | etcd configuration and TLS certificates |
 | `/etc/etcd/pki/` | etcd nodes | etcd TLS certificate and key files |
 | `{{SSL_CERT_PATH}}`, `{{SSL_KEY_PATH}}`, `{{SSL_CA_PATH}}` | Management workstation or KEMP | SSL certificates for frontend |
@@ -420,7 +436,7 @@ rsync -az --relative \
 # Patroni configs
 rsync -az --relative \
   /etc/patroni/ \
-  /etc/pgbackrest.conf \
+  /etc/pgbackrest/ \
   "${BACKUP_DIR}/patroni/"
 
 # etcd configs (including TLS certs)
@@ -493,6 +509,32 @@ curl -sk -o /dev/null -w "%{http_code}" https://{{VIP_FRONTEND_B}}
 
 ---
 
+#### DR Scenario 1b: Primary Site Lost — No etcd Quorum
+
+If etcd-3 is at Site A (both etcd-1 and etcd-3 lost), Site B has only 1 of 3 etcd members and **cannot form quorum**. Patroni will NOT auto-promote.
+
+**Manual intervention required:**
+
+```bash
+# 1. Verify etcd quorum is lost
+etcdctl endpoint health --endpoints=https://{{ETCD_2_IP}}:2379 \
+  --cacert={{ETCD_CA_CERT_PATH}}
+# Expected: unhealthy (no quorum)
+
+# 2. Force Patroni failover (ONLY if certain Site A will not return)
+patronictl -c /etc/patroni/patroni.yml failover zabbix-cluster \
+  --candidate pg-siteB --force
+
+# 3. Update DNS if using Option A strategy
+# zabbix.{{DOMAIN}} -> {{VIP_FRONTEND_B}}
+
+# 4. Notify: Site A agents/proxies are offline until rebuilt
+```
+
+> **Recommendation:** Place etcd-3 at Site B to avoid this scenario entirely.
+
+---
+
 ### DR Scenario 2 — Database Corruption (Point-in-Time Recovery)
 
 **Condition:** Data corruption is detected in the Zabbix database. Both primary and replica contain corrupted data (replication propagated the corruption).
@@ -514,7 +556,8 @@ ETCDCTL_API=3 etcdctl del /service/zabbix-cluster --prefix \
   --endpoints=https://{{ETCD_1_IP}}:2379 \
   --cacert={{ETCD_CA_CERT_PATH}} \
   --cert=/etc/etcd/pki/etcd-1.crt \
-  --key=/etc/etcd/pki/etcd-1.key
+  --key=/etc/etcd/pki/etcd-1.key \
+  --user root:{{ETCD_ROOT_PASSWORD}}
 
 # 4. Restore the database to the target timestamp on the PRIMARY node (pg-siteA)
 sudo -u postgres pgbackrest --stanza=zabbix-cluster \
@@ -662,7 +705,7 @@ patronictl -c /etc/patroni/patroni.yml show-config | grep failsafe
    ```bash
    sudo -u postgres pgbackrest --stanza=zabbix-cluster stanza-create
    ```
-3. Verify `pg1-path` in `/etc/pgbackrest.conf` matches the actual PostgreSQL data directory:
+3. Verify `pg1-path` in `/etc/pgbackrest/pgbackrest.conf` matches the actual PostgreSQL data directory:
    ```bash
    psql -U postgres -c "SHOW data_directory;"
    ```
@@ -711,7 +754,7 @@ patronictl -c /etc/patroni/patroni.yml show-config | grep failsafe
    # If AWS CLI is available
    aws s3 ls s3://{{BACKUP_S3_BUCKET}} --endpoint-url https://{{BACKUP_S3_ENDPOINT}}
    ```
-3. Verify the region is correct in `/etc/pgbackrest.conf`
+3. Verify the region is correct in `/etc/pgbackrest/pgbackrest.conf`
 4. If using a non-AWS S3-compatible service, confirm `repo1-s3-uri-style` is set correctly (path-style vs virtual-hosted):
    ```ini
    # Add to [global] section if using path-style URLs (MinIO, Ceph, etc.)

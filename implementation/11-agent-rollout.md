@@ -138,6 +138,14 @@ Navigate to **Alerts > Actions > Autoregistration actions > Create action**.
 
 > **Important:** Auto-registration actions are evaluated independently. A host with `HostMetadata=Linux Nginx Docker production` will match actions 1e, 1f, and 1h, resulting in three host groups and three templates being applied. This is the intended behavior — roles stack.
 
+> **IMPORTANT — PSK gap in auto-registration:** Auto-registration creates the host but does NOT configure PSK encryption on the server side. After auto-registration, an administrator must manually configure the PSK identity and value for each host via the Zabbix frontend or API. For automated PSK provisioning, use the Zabbix API to update the host's PSK settings as part of your deployment pipeline:
+> ```bash
+> # Example: Set PSK on auto-registered host via API
+> curl -s -X POST "{{ZABBIX_FRONTEND_URL}}/api_jsonrpc.php" \
+>   -H "Content-Type: application/json" \
+>   -d '{"jsonrpc":"2.0","method":"host.update","params":{"hostid":"<HOST_ID>","tls_connect":2,"tls_accept":2,"tls_psk_identity":"PSK_<HOSTNAME>","tls_psk":"<64-char-hex>"},"id":1,"auth":"<API_TOKEN>"}'
+> ```
+
 ### 1i. Create Required Host Groups
 
 Before agents start connecting, create the following host groups at **Data collection > Host groups > Create host group**:
@@ -193,10 +201,18 @@ LogFile=C:\Program Files\Zabbix Agent 2\zabbix_agent2.log
 LogFileSize=10
 DebugLevel=3
 
+# --- Security ---
+DenyKey=system.run[*]
+
 # --- Performance ---
 BufferSend=5
 BufferSize=100
 ```
+
+> **Windows file permissions:** Restrict the PSK file ACL to SYSTEM and Administrators only:
+> ```powershell
+> icacls "C:\Program Files\Zabbix Agent 2\zabbix_agent2.psk" /inheritance:r /grant:r "SYSTEM:(R)" /grant:r "Administrators:(R)"
+> ```
 
 **HostMetadata construction:**
 
@@ -237,6 +253,7 @@ Store the PSK identity and value in your secrets manager for each host. You will
 For silent deployment via GPO, SCCM, or Intune:
 
 ```powershell
+# Note: {{FILE_SHARE}} is defined in the environment variables catalog (00-environment-variables.md)
 msiexec /i "\\{{FILE_SHARE}}\zabbix_agent2-7.0.0-windows-amd64-openssl.msi" /qn ^
   SERVER="{{PROXY_A1_IP}},{{PROXY_A2_IP}}" ^
   SERVERACTIVE="{{PROXY_A1_IP}};{{PROXY_A2_IP}}" ^
@@ -344,6 +361,9 @@ TLSPSKFile=/etc/zabbix/zabbix_agent2.psk
 LogFile=/var/log/zabbix/zabbix_agent2.log
 LogFileSize=10
 DebugLevel=3
+
+# --- Security ---
+DenyKey=system.run[*]
 
 # --- Performance ---
 BufferSend=5

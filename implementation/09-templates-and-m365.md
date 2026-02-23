@@ -129,7 +129,9 @@ These hosts monitor the Zabbix infrastructure components themselves — the data
 |-------|-------|------|
 | `{$PG.URI}` | `tcp://{{PG_A_IP}}:5432` | Text |
 | `{$PG.USER}` | `zbx_monitor` | Text |
-| `{$PG.PASSWORD}` | `{{DB_ZABBIX_PASSWORD}}` | Secret |
+| `{$PG.PASSWORD}` | `{{DB_MONITOR_PASSWORD}}` | Secret |
+
+> **Note:** The `zbx_monitor` user was created in Phase 02 with read-only `pg_monitor` role privileges.
 | `{$PG.DB}` | `zabbix` | Text |
 
 ### 3b. PostgreSQL — Site B
@@ -402,6 +404,8 @@ The default template intervals are designed to stay well within these limits. Do
 
 > **Tip:** If you see `429 Too Many Requests` errors in the item status, increase the polling interval on the affected items.
 
+**Monitor app secret expiry:** Create a calculated or script item to track the M365 app registration secret expiry date. Use the `Application.Read.All` permission (already granted) to query `GET https://graph.microsoft.com/v1.0/applications/{app-id}` and extract `passwordCredentials[].endDateTime`. Create a trigger to alert 30 days before expiry.
+
 ---
 
 ## Verification Checkpoint
@@ -475,6 +479,8 @@ Complete all checks before proceeding to the next phase.
      -d "grant_type=client_credentials"
    ```
    A successful response returns an `access_token`. An error response indicates which parameter is wrong.
+
+   > **Security note:** Avoid passing client secrets on the command line. Use `--data @token-request.json` or source the secret from an environment variable to avoid shell history exposure.
 
 ### Patroni HTTP Items Timeout
 

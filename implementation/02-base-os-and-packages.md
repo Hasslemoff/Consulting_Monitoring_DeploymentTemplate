@@ -50,7 +50,7 @@ nmcli con mod "System eth0" \
   ipv4.method manual \
   ipv4.addresses {{ZBX_SERVER_A_IP}}/24 \
   ipv4.gateway {{SITE_A_GATEWAY}} \
-  ipv4.dns "{{NTP_SERVER_1}}" \
+  ipv4.dns "{{DNS_SERVER_1}}" \
   connection.autoconnect yes
 
 nmcli con up "System eth0"
@@ -261,6 +261,13 @@ Verify:
 rpm -q zabbix-web-pgsql zabbix-nginx-conf zabbix-selinux-policy
 ```
 
+> **Self-monitoring:** Install Zabbix Agent 2 on **all** infrastructure VMs — including database, etcd, and frontend VMs — to enable self-monitoring (Phase 09). Add the Zabbix repository first if not already installed:
+> ```bash
+> rpm -Uvh https://repo.zabbix.com/zabbix/7.0/rocky/9/x86_64/zabbix-release-latest-7.0.el9.noarch.rpm
+> dnf clean all
+> dnf install -y zabbix-agent2
+> ```
+
 ---
 
 ## Step 6 — Zabbix Proxy Packages (Proxy VMs Only)
@@ -346,6 +353,10 @@ systemctl start postgresql-16
 ```bash
 sudo -u postgres createuser --pwprompt zabbix
 # Enter {{DB_ZABBIX_PASSWORD}} when prompted
+
+# Create read-only monitoring user for Zabbix Agent 2 PostgreSQL plugin
+sudo -u postgres createuser --pwprompt zbx_monitor
+sudo -u postgres psql -c "GRANT pg_monitor TO zbx_monitor;"
 
 sudo -u postgres createdb -O zabbix -E Unicode -T template0 zabbix
 ```

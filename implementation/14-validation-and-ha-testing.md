@@ -133,7 +133,19 @@ watch -n 2 'patronictl -c /etc/patroni/patroni.yml list'
 - `pg-siteA` becomes `Sync Standby` or `Replica`
 - Replication lag returns to 0
 
-### 2c. Verify KEMP Re-Routes to New Primary
+### 2c. Ungraceful Database Failure
+
+**Ungraceful database failure:**
+```bash
+# Simulate crash of primary PostgreSQL
+sudo kill -9 $(pidof postgres)
+
+# Verify Patroni detects failure and promotes standby
+# Watch: patronictl -c /etc/patroni/patroni.yml list
+# Expected: Site B promoted within 30 seconds (TTL expiry)
+```
+
+### 2d. Verify KEMP Re-Routes to New Primary
 
 ```bash
 # Check which backend KEMP is routing to
@@ -152,7 +164,7 @@ psql -h {{VIP_DB_B}} -p 5432 -U zabbix -d zabbix -c "SELECT pg_is_in_recovery();
 # Expected: f (false — both VIPs route to the same primary)
 ```
 
-### 2d. Verify Zabbix Server Reconnected
+### 2e. Verify Zabbix Server Reconnected
 
 ```bash
 # Check Zabbix server logs for database reconnection
@@ -160,14 +172,14 @@ tail -50 /var/log/zabbix/zabbix_server.log | grep -i "database"
 # Look for: successful reconnection messages, no persistent errors
 ```
 
-### 2e. Verify Replication Resumes
+### 2f. Verify Replication Resumes
 
 ```bash
 patronictl -c /etc/patroni/patroni.yml list
 # Expected: Leader = pg-siteB, Sync Standby = pg-siteA, Lag = 0
 ```
 
-### 2f. Switch Back (Optional)
+### 2g. Switch Back (Optional)
 
 If the original topology is desired, perform another switchover:
 
@@ -224,11 +236,31 @@ After the rebooted KEMP VM comes back online:
 curl -k -s "https://bal:{{KEMP_ADMIN_PASSWORD}}@{{KEMP_A1_IP}}:8443/access/hastatus" | xmllint --format -
 ```
 
+> **Security note:** Avoid passing passwords in URLs on the command line. Use environment variables (e.g., `curl -k -s "https://bal:${KEMP_ADMIN_PASSWORD}@..."`) or a `.netrc` file to avoid shell history exposure.
+
 Both units should be visible, with one as Master and one as Slave.
 
 ### 3e. Repeat for Site B
 
 Repeat Steps 3b-3d for the Site B KEMP HA pair using `{{KEMP_B1_IP}}` and `{{KEMP_B2_IP}}`.
+
+### Step 3b (addendum): etcd Member Loss Test
+
+```bash
+# Stop one etcd node (not the leader)
+ssh etcd-3 "sudo systemctl stop etcd"
+
+# Verify quorum maintained (2 of 3 nodes)
+etcdctl endpoint health \
+  --endpoints=https://{{ETCD_1_IP}}:2379,https://{{ETCD_2_IP}}:2379 \
+  --cacert={{ETCD_CA_CERT_PATH}}
+
+# Verify Patroni still operational
+patronictl -c /etc/patroni/patroni.yml list
+
+# Restore etcd node
+ssh etcd-3 "sudo systemctl start etcd"
+```
 
 ---
 

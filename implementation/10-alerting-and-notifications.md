@@ -46,7 +46,7 @@ Example: `https://zabbix.example.com`
 |-------|-------|
 | Name | `Email` |
 | Type | Email |
-| SMTP server | `{{SMTP_HELO}}` |
+| SMTP server | `{{SMTP_SERVER}}` |
 | SMTP server port | `587` |
 | SMTP helo | `{{SMTP_HELO}}` |
 | SMTP email | `{{SMTP_FROM_EMAIL}}` |
@@ -165,6 +165,8 @@ If a Slack App does not already exist:
 | `bot_token` | `{{SLACK_BOT_TOKEN}}` |
 | `channel` | `{{SLACK_CHANNEL}}` |
 
+> **Important:** Store sensitive webhook parameters as **Secret** type in Zabbix to prevent them from being visible in the frontend or API responses.
+
 ### 4c. Test Slack Integration
 
 1. Click **Test** on the Slack media type
@@ -190,6 +192,8 @@ If a Slack App does not already exist:
 | Parameter | Value |
 |-----------|-------|
 | `token` | `{{PAGERDUTY_INTEGRATION_KEY}}` |
+
+> **Important:** Store sensitive webhook parameters as **Secret** type in Zabbix to prevent them from being visible in the frontend or API responses.
 
 > **Note:** The integration key is specific to a PagerDuty **service**. If you need alerts routed to different PagerDuty services, create multiple PagerDuty media types with different integration keys, or use PagerDuty Event Orchestration to route by payload content.
 
@@ -379,6 +383,27 @@ Navigate to **Alerts > Actions > Trigger actions > Create action** for each esca
 | 3 | 3 | 0 | Send message to user group: `Management` via `Email` |
 
 > **Explanation:** Step 1 fires immediately via PagerDuty and email. If still unresolved after 30 minutes, Step 2 re-pages the NOC. After another 30 minutes (60 minutes total), Step 3 escalates to Management.
+
+**Recovery operations** tab:
+
+| Operation |
+|-----------|
+| Notify all involved |
+
+### Action 4 — Average: Email + Teams/Slack
+
+| Field | Value |
+|-------|-------|
+| Name | `Average — Email + Teams/Slack` |
+| Conditions | Trigger severity = Average |
+| Enabled | Yes |
+
+**Operations** tab:
+
+| Step | Start | Duration | Operation |
+|------|-------|----------|-----------|
+| 1 | 1 | 0 (default) | Send message to user group: `NOC Operations` via `Email` |
+| 1 | 1 | 0 (default) | Send message to user group: `NOC Operations` via `MS Teams` |
 
 **Recovery operations** tab:
 

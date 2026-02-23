@@ -80,6 +80,24 @@ zabbixProxy:
       value: "60"
 ```
 
+> **Encryption:** Configure PSK for the in-cluster proxy to match the encryption policy of all other proxies (Phase 08). Add to the Helm values:
+> ```yaml
+> zabbixProxy:
+>   env:
+>     ZBX_TLSCONNECT: psk
+>     ZBX_TLSPSKIDENTITY: "PSK_K8S_{{K8S_CLUSTER_NAME}}"
+>     ZBX_TLSPSKFILE: /etc/zabbix/proxy.psk
+>   extraVolumeMounts:
+>     - name: psk-secret
+>       mountPath: /etc/zabbix/proxy.psk
+>       subPath: proxy.psk
+>   extraVolumes:
+>     - name: psk-secret
+>       secret:
+>         secretName: zabbix-proxy-psk
+> ```
+> Create the secret: `kubectl create secret generic zabbix-proxy-psk --from-file=proxy.psk -n {{K8S_NAMESPACE}}`
+
 **Zabbix Agent Configuration:**
 
 ```yaml
@@ -208,6 +226,8 @@ kubectl create token zabbix-service-account \
 ```
 
 > **Note:** The `--duration=8760h` flag creates a token valid for 1 year. Set a calendar reminder to rotate this token before expiration. For production environments, consider using shorter-lived tokens with automated rotation.
+
+> **Token rotation:** Add K8s API token rotation to quarterly maintenance tasks (Phase 15). Create a CronJob or external automation to regenerate the token before expiry and update the Zabbix host macro.
 
 ### 4b. Store the Token
 
@@ -451,17 +471,15 @@ Complete all checks before marking this phase done.
    kubectl auth can-i create clusterrole --all-namespaces
    # Expected: yes
    ```
-2. If using a restricted context, create the RBAC resources manually first:
-   ```bash
-   kubectl create clusterrolebinding zabbix-admin \
-     --clusterrole=cluster-admin \
-     --serviceaccount={{K8S_NAMESPACE}}:zabbix-service-account
-   ```
+2. > **NEVER use `cluster-admin` for monitoring.** If RBAC permissions are insufficient, inspect the ClusterRole created by the Helm chart and extend it with only the specific API groups and resources needed. Example:
+   > ```bash
+   > kubectl get clusterrole zabbix-clusterrole -o yaml   # Review existing permissions
+   > ```
+
 3. If your cluster uses Pod Security Admission, ensure the namespace allows the required security contexts:
+   > Use `baseline` Pod Security Standard with specific exemptions rather than `privileged`:
    ```bash
-   kubectl label namespace {{K8S_NAMESPACE}} \
-     pod-security.kubernetes.io/enforce=privileged \
-     --overwrite
+   kubectl label namespace {{K8S_NAMESPACE}} pod-security.kubernetes.io/enforce=baseline --overwrite
    ```
 
 ### Proxy Cannot Reach Zabbix Server

@@ -30,6 +30,7 @@ Verify that all data in transit between Zabbix components is encrypted.
 | E-8 | HTTP-to-HTTPS redirect active on KEMP (port 80 → 443 with 301) | Verify: `curl -I http://{{VIP_FRONTEND_A}}` returns 301 to HTTPS | [ ] Verified |
 | E-9 | SSL certificate chain is complete (server cert + intermediates + root) | Verify: `openssl s_client -connect {{VIP_FRONTEND_A}}:443` shows full chain | [ ] Verified |
 | E-10 | TLS 1.2 is the minimum supported protocol version on KEMP | Disable SSLv3, TLS 1.0, TLS 1.1 in KEMP SSL Properties | [ ] Verified |
+| E-11 | Auto-registered hosts have PSK configured post-registration (manual or API-automated) **(Critical)** | Auto-registration does NOT set PSK on the server side; verify all hosts have PSK identity and value configured | [ ] Verified |
 
 ---
 
@@ -69,6 +70,10 @@ Verify that access to all components follows the principle of least privilege.
 | A-9 | Zabbix Agent 2 `system.run[*]` is disabled (default behavior; verify DenyKey/AllowKey) **(Critical)** | `system.run[*]` allows arbitrary command execution on the monitored host; must be denied | [ ] Verified |
 | A-10 | Zabbix Agent 2 `AllowKey` / `DenyKey` configured to restrict item keys to only those required | Review `/etc/zabbix/zabbix_agent2.conf` for permissive `AllowKey=*` entries | [ ] Verified |
 | A-11 | SSH access to all Zabbix VMs restricted to authorized personnel (key-based authentication preferred) | Password-based SSH should be disabled; `PermitRootLogin no` in sshd_config | [ ] Verified |
+| A-12 | Kubernetes Zabbix service account uses least-privilege RBAC (NOT `cluster-admin`) **(Critical)** | Verify ClusterRole bound to the service account grants only required API groups and resources | [ ] Verified |
+| A-13 | Kubernetes namespace has NetworkPolicy restricting ingress/egress | Verify egress limited to Zabbix Server IPs on port 10051 and Kubernetes API | [ ] Verified |
+| A-14 | Kubernetes Pod Security Standard applied (minimum `baseline`) | Verify: `kubectl get ns {{K8S_NAMESPACE}} -o jsonpath='{.metadata.labels}'` | [ ] Verified |
+| A-15 | Patroni REST API authentication enabled (`restapi.authentication` in patroni.yml) **(Critical)** | Unauthenticated REST API allows unauthorized failovers and configuration changes | [ ] Verified |
 
 ---
 
@@ -106,6 +111,7 @@ Verify that logging, backup, and maintenance processes are properly secured.
 | O-9 | SELinux set to **Enforcing** on all RHEL/Rocky VMs | Verify: `getenforce` returns `Enforcing` on each VM | [ ] Verified |
 | O-10 | Zabbix SELinux policy module installed (`zabbix-selinux-policy` package) | Without the policy module, SELinux will block Zabbix server/agent operations | [ ] Verified |
 | O-11 | Automated OS patching schedule documented (but does not auto-reboot Zabbix server or database VMs without coordination) | Uncoordinated reboots can trigger unintended HA failovers | [ ] Verified |
+| O-12 | Backup encryption key stored separately from backup repository (not co-located) | If the encryption key is lost, all encrypted backups become unrecoverable | [ ] Verified |
 
 ---
 

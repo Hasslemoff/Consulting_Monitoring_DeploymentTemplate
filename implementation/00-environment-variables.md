@@ -30,8 +30,8 @@
 | `{{PROXY_A_SNMPTRAP_IP}}` | SNMP trap proxy Site A IP | `10.1.1.42` | 01, 08 |
 | `{{KEMP_A1_IP}}` | KEMP VLM-A1 management IP | `10.1.1.50` | 01, 05 |
 | `{{KEMP_A2_IP}}` | KEMP VLM-A2 management IP | `10.1.1.51` | 01, 05 |
-| `{{VIP_FRONTEND_A}}` | KEMP shared VIP — Frontend (Site A) | `10.1.1.100` | 01, 05, 07 |
-| `{{VIP_DB_A}}` | KEMP shared VIP — Database (Site A) | `10.1.1.200` | 01, 05, 06, 07 |
+| `{{VIP_FRONTEND_A}}` | KEMP shared VIP — Frontend (Site A) | `10.1.1.100` | 01, 05, 07, 14, 15 |
+| `{{VIP_DB_A}}` | KEMP shared VIP — Database (Site A) | `10.1.1.200` | 01, 05, 06, 07, 14, 15 |
 
 ## Network — Site B
 
@@ -49,8 +49,8 @@
 | `{{PROXY_B_SNMPTRAP_IP}}` | SNMP trap proxy Site B IP | `10.2.1.42` | 01, 08 |
 | `{{KEMP_B1_IP}}` | KEMP VLM-B1 management IP | `10.2.1.50` | 01, 05 |
 | `{{KEMP_B2_IP}}` | KEMP VLM-B2 management IP | `10.2.1.51` | 01, 05 |
-| `{{VIP_FRONTEND_B}}` | KEMP shared VIP — Frontend (Site B) | `10.2.1.100` | 01, 05, 07 |
-| `{{VIP_DB_B}}` | KEMP shared VIP — Database (Site B) | `10.2.1.200` | 01, 05, 06, 07 |
+| `{{VIP_FRONTEND_B}}` | KEMP shared VIP — Frontend (Site B) | `10.2.1.100` | 01, 05, 07, 14, 15 |
+| `{{VIP_DB_B}}` | KEMP shared VIP — Database (Site B) | `10.2.1.200` | 01, 05, 06, 07, 14, 15 |
 
 ## DNS
 
@@ -58,11 +58,13 @@
 |----------|-------------|---------|---------|
 | `{{DOMAIN}}` | Primary DNS domain | `example.com` | 01, 07, 10, 11, 15 |
 | `{{FQDN_FRONTEND}}` | Primary frontend URL | `zabbix.example.com` | 01, 05, 07, 15 |
-| `{{FQDN_FRONTEND_B}}` | Secondary/DR frontend URL | `zabbix-b.example.com` | 01, 05, 07 |
+| `{{FQDN_FRONTEND_B}}` | Secondary/DR frontend URL | `zabbix-b.example.com` | 01 |
 | `{{FQDN_DB_VIP_A}}` | Database VIP DNS (Site A) | `db-vip-a.example.com` | 01, 04 |
 | `{{FQDN_DB_VIP_B}}` | Database VIP DNS (Site B) | `db-vip-b.example.com` | 01, 04 |
 | `{{NTP_SERVER_1}}` | Primary NTP server | `ntp1.example.com` | 01, 02 |
 | `{{NTP_SERVER_2}}` | Secondary NTP server | `ntp2.example.com` | 01, 02 |
+| `{{DNS_SERVER_1}}` | Primary DNS server | `10.1.1.2` | 01, 02 |
+| `{{DNS_SERVER_2}}` | Secondary DNS server | `10.1.1.3` | 01, 02 |
 | `{{DNS_TTL}}` | DNS record TTL (seconds) | `60` | 01 |
 
 ## Credentials (vault)
@@ -74,7 +76,7 @@
 | `{{DB_REPLICATOR_PASSWORD}}` | PostgreSQL replication user password `(vault)` | `<generated>` | 04 |
 | `{{ETCD_ROOT_PASSWORD}}` | etcd `root` user password `(vault)` | `<generated>` | 03 |
 | `{{ETCD_PATRONI_PASSWORD}}` | etcd `patroni` user password `(vault)` | `<generated>` | 03, 04 |
-| `{{KEMP_ADMIN_PASSWORD}}` | KEMP LoadMaster admin password `(vault)` | `<generated>` | 05 |
+| `{{KEMP_ADMIN_PASSWORD}}` | KEMP LoadMaster admin password `(vault)` | `<generated>` | 05, 14 |
 | `{{PGBOUNCER_MD5_HASH}}` | PgBouncer auth hash for zabbix user `(vault)` | `md5...` | 04 |
 | `{{PSK_PROXY_A1}}` | PSK value for Proxy-A1 `(vault)` | `<64-char hex>` | 08, 16 |
 | `{{PSK_PROXY_A2}}` | PSK value for Proxy-A2 `(vault)` | `<64-char hex>` | 08, 16 |
@@ -82,6 +84,9 @@
 | `{{PSK_PROXY_B2}}` | PSK value for Proxy-B2 `(vault)` | `<64-char hex>` | 08, 16 |
 | `{{PSK_PROXY_A_SNMPTRAP}}` | PSK value for SNMP trap proxy A `(vault)` | `<64-char hex>` | 08, 16 |
 | `{{PSK_PROXY_B_SNMPTRAP}}` | PSK value for SNMP trap proxy B `(vault)` | `<64-char hex>` | 08, 16 |
+| `{{DB_MONITOR_PASSWORD}}` | PostgreSQL `zbx_monitor` read-only user password `(vault)` | `<generated>` | 02, 09 |
+| `{{PATRONI_API_PASSWORD}}` | Patroni REST API authentication password `(vault)` | `<generated>` | 04, 05 |
+| `{{BACKUP_ENCRYPTION_KEY}}` | pgBackRest backup encryption passphrase `(vault)` | `<generated>` | 13 |
 
 ## Sizing
 
@@ -89,9 +94,15 @@
 |----------|-------------|---------|---------|
 | `{{SIZING_TIER}}` | Deployment tier: Small / Medium / Large / Very Large | `Medium` | 02, 06 |
 | `{{EXPECTED_HOSTS}}` | Total monitored hosts | `1500` | 02, 06 |
-| `{{EXPECTED_NVPS}}` | Expected New Values Per Second | `12000` | 02, 06 |
-| `{{INTER_SITE_RTT_MS}}` | Inter-site round-trip time (ms) | `3` | 04 |
+| `{{EXPECTED_NVPS}}` | Expected New Values Per Second | `12000` | 02, 04, 06 |
+| `{{INTER_SITE_RTT_MS}}` | Inter-site round-trip time (ms) | `3` | 04, 06 |
 | `{{REPLICATION_MODE}}` | `synchronous` or `asynchronous` | `synchronous` | 04 |
+
+## Database Connectivity
+
+| Variable | Description | Example | Used In |
+|----------|-------------|---------|---------|
+| `{{DB_PORT}}` | Database client port (`5432` direct, `6432` via PgBouncer) | `5432` | 05, 06, 07 |
 
 ## VMware
 
@@ -109,7 +120,7 @@
 | Variable | Description | Example | Used In |
 |----------|-------------|---------|---------|
 | `{{TLS_ORG_NAME}}` | Organization name for certificate subjects | `MyOrg` | 03 |
-| `{{ETCD_CA_CERT_PATH}}` | Path to etcd CA certificate | `/etc/etcd/pki/ca.crt` | 03, 04 |
+| `{{ETCD_CA_CERT_PATH}}` | Path to etcd CA certificate | `/etc/etcd/pki/ca.crt` | 03, 04, 09, 13, 14 |
 | `{{ETCD_CA_KEY_PATH}}` | Path to etcd CA key | `/etc/etcd/pki/ca.key` | 03 |
 | `{{SSL_CERT_PATH}}` | Frontend SSL certificate path (KEMP import) | `/path/to/zabbix.crt` | 05 |
 | `{{SSL_KEY_PATH}}` | Frontend SSL private key path (KEMP import) | `/path/to/zabbix.key` | 05 |
@@ -135,6 +146,7 @@
 
 | Variable | Description | Example | Used In |
 |----------|-------------|---------|---------|
+| `{{SMTP_SERVER}}` | SMTP relay server hostname | `smtp.example.com` | 10 |
 | `{{SMTP_FROM_EMAIL}}` | Zabbix email sender | `zabbix@example.com` | 10 |
 | `{{SMTP_FROM_NAME}}` | Zabbix email display name | `Zabbix NOC` | 10 |
 | `{{SMTP_HELO}}` | SMTP HELO domain | `example.com` | 10 |
@@ -142,7 +154,13 @@
 | `{{SLACK_BOT_TOKEN}}` | Slack bot OAuth token `(vault)` | `xoxb-...` | 10 |
 | `{{SLACK_CHANNEL}}` | Default Slack channel | `#zabbix-alerts` | 10 |
 | `{{PAGERDUTY_INTEGRATION_KEY}}` | PagerDuty integration key `(vault)` | `<32-char hex>` | 10 |
-| `{{ZABBIX_FRONTEND_URL}}` | Zabbix URL for alert links | `https://zabbix.example.com` | 10 |
+| `{{ZABBIX_FRONTEND_URL}}` | Zabbix URL for alert links | `https://zabbix.example.com` | 07, 10 |
+
+## Agent Deployment
+
+| Variable | Description | Example | Used In |
+|----------|-------------|---------|---------|
+| `{{FILE_SHARE}}` | Windows network share for MSI distribution | `\\\\fileserver\\zabbix` | 11 |
 
 ## Kubernetes
 
@@ -178,14 +196,16 @@
 |----------|-------|-----------|
 | Network — Site A | 15 | No |
 | Network — Site B | 14 | No |
-| DNS | 8 | No |
-| Credentials | 13 | Yes |
+| DNS | 10 | No |
+| Credentials | 16 | Yes |
 | Sizing | 5 | No |
+| Database Connectivity | 1 | No |
 | VMware | 6 | Partial |
 | TLS/SSL | 6 | Partial |
 | Backup | 11 | Partial |
-| Alerting | 8 | Partial |
+| Alerting | 9 | Partial |
+| Agent Deployment | 1 | No |
 | Kubernetes | 3 | No |
 | SNMP | 5 | Partial |
 | Microsoft 365 | 3 | Partial |
-| **Total** | **~97** | |
+| **Total** | **~105** | |
