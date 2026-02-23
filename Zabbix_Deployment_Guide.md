@@ -43,7 +43,8 @@
 ═══════════════════════════════════════════════════════════════════════════
 
   [KEMP VLM-A1 (Active)]  [KEMP VLM-A2 (Passive)]   ← HA pair (CARP)
-       │ Shared VIP-A (Frontend + DB)                             │
+       │ VIP-A Frontend: 10.1.1.100                              │
+       │ VIP-A Database: 10.1.1.200                              │
        ├──────────────────────────────────────┐                   │
   [Frontend-A]   [Zabbix Server Node-01 (Active)]                 │
                       │                                           │
@@ -62,7 +63,8 @@
 ═══════════════════════════════════════════════════════════════════════════
 
   [KEMP VLM-B1 (Active)]  [KEMP VLM-B2 (Passive)]   ← HA pair (CARP)
-       │ Shared VIP-B (Frontend + DB)                             │
+       │ VIP-B Frontend: 10.2.1.100                              │
+       │ VIP-B Database: 10.2.1.200                              │
        ├──────────────────────────────────────┐                   │
   [Frontend-B]   [Zabbix Server Node-02 (Standby)]                │
                       │                                           │
@@ -232,6 +234,19 @@ This is the concrete bill of materials. Each site deploys the following VMs (ass
 | `proxy-siteA-02` | A | 10.1.1.41 | Zabbix Proxy at Site A |
 | `proxy-siteB-01` | A | 10.2.1.40 | Zabbix Proxy at Site B |
 | `proxy-siteB-02` | A | 10.2.1.41 | Zabbix Proxy at Site B |
+| `pg-siteA` | A | 10.1.1.20 | PostgreSQL node at Site A |
+| `pg-siteB` | A | 10.2.1.20 | PostgreSQL node at Site B |
+| `etcd-1` | A | 10.1.1.30 | etcd cluster member at Site A |
+| `etcd-2` | A | 10.2.1.30 | etcd cluster member at Site B |
+| `etcd-3` | A | 10.1.1.31 | etcd quorum tiebreaker |
+| `frontend-siteA` | A | 10.1.1.15 | Zabbix Frontend at Site A |
+| `frontend-siteB` | A | 10.2.1.15 | Zabbix Frontend at Site B |
+| `kemp-a1` | A | 10.1.1.50 | KEMP VLM-A1 management (Active) |
+| `kemp-a2` | A | 10.1.1.51 | KEMP VLM-A2 management (Passive) |
+| `kemp-b1` | A | 10.2.1.50 | KEMP VLM-B1 management (Active) |
+| `kemp-b2` | A | 10.2.1.51 | KEMP VLM-B2 management (Passive) |
+| `proxy-siteA-snmptrap` | A | 10.1.1.42 | SNMP trap receiver at Site A |
+| `proxy-siteB-snmptrap` | A | 10.2.1.42 | SNMP trap receiver at Site B |
 
 ### Cross-Site Frontend Failover Strategy
 
@@ -274,6 +289,32 @@ Server=proxy-siteA-01,proxy-siteA-02
 
 **Rocky Linux 9** (or RHEL 9) for all Zabbix VMs. Rocky Linux is binary-compatible with RHEL, free, and well-supported by all components.
 
+### Time Synchronization (ALL VMs -- Do This First)
+
+Synchronized clocks are **critical** for etcd elections, Patroni leader TTLs, Zabbix HA heartbeats, and TLS certificate validation. Clock drift > 1 second can cause split-brain or false failovers.
+
+```bash
+dnf install -y chrony
+systemctl enable --now chronyd
+
+# Verify synchronization
+chronyc tracking
+chronyc sources -v
+```
+
+**If using internal NTP servers** (recommended for air-gapped or enterprise environments), edit `/etc/chrony.conf`:
+
+```ini
+# Replace default pool lines with your internal NTP servers
+server ntp1.example.com iburst
+server ntp2.example.com iburst
+driftfile /var/lib/chrony/drift
+makestep 1.0 3
+rtcsync
+```
+
+> **Validation:** Run `chronyc tracking` on all VMs. The **System time** offset should be < 10ms. If any VM shows > 100ms offset, investigate before proceeding with etcd or Patroni setup.
+
 ### Package Installation -- Step by Step
 
 #### 4a. PostgreSQL 16 + TimescaleDB (Database VMs)
@@ -301,7 +342,54 @@ EOL
 dnf install -y timescaledb-2-postgresql-16 timescaledb-2-loader-postgresql-16
 ```
 
-#### 4b. Zabbix Repository (All Zabbix VMs)
+#### 4b. Patroni (Database VMs)
+
+```bash
+# Patroni from PGDG extras (recommended -- matches PostgreSQL version)
+dnf install -y 'dnf-command(config-manager)'
+dnf config-manager --enable pgdg-rhel9-extras
+dnf install -y patroni patroni-etcd
+
+# Verify
+patroni --version
+patronictl version
+```
+
+Create the Patroni config directory and user:
+
+```bash
+useradd -r -s /sbin/nologin patroni 2>/dev/null || true
+mkdir -p /etc/patroni
+chown postgres:postgres /etc/patroni
+chmod 750 /etc/patroni
+```
+
+#### 4c. pgBackRest (Database VMs)
+
+```bash
+dnf install -y pgbackrest
+
+# Create log directory
+mkdir -p /var/log/pgbackrest
+chown postgres:postgres /var/log/pgbackrest
+```
+
+#### 4d. PgBouncer (Database VMs or Frontend VMs -- see Section 6)
+
+```bash
+dnf install -y pgbouncer
+
+# Create auth file
+touch /etc/pgbouncer/userlist.txt
+chown pgbouncer:pgbouncer /etc/pgbouncer/userlist.txt
+chmod 640 /etc/pgbouncer/userlist.txt
+
+# Add Zabbix user (MD5 hash: "md5" + md5(password + username))
+# Generate with: echo -n "md5$(echo -n '<password>zabbix' | md5sum | cut -d' ' -f1)"
+echo '"zabbix" "<md5hash>"' >> /etc/pgbouncer/userlist.txt
+```
+
+#### 4e. Zabbix Repository (All Zabbix VMs)
 
 ```bash
 rpm -Uvh https://repo.zabbix.com/zabbix/7.0/rocky/9/x86_64/zabbix-release-latest-7.0.el9.noarch.rpm
@@ -310,19 +398,19 @@ dnf clean all
 
 > If EPEL is enabled, add `excludepkgs=zabbix*` to `/etc/yum.repos.d/epel.repo` to prevent conflicts.
 
-#### 4c. Zabbix Server (Server VMs)
+#### 4f. Zabbix Server (Server VMs)
 
 ```bash
 dnf install -y zabbix-server-pgsql zabbix-sql-scripts zabbix-selinux-policy zabbix-agent2
 ```
 
-#### 4d. Zabbix Frontend (Frontend VMs)
+#### 4g. Zabbix Frontend (Frontend VMs)
 
 ```bash
 dnf install -y zabbix-web-pgsql zabbix-nginx-conf zabbix-selinux-policy
 ```
 
-#### 4e. Zabbix Proxy (Proxy VMs)
+#### 4h. Zabbix Proxy (Proxy VMs)
 
 ```bash
 # SQLite backend (< 1K NVPS per proxy)
@@ -332,7 +420,7 @@ dnf install -y zabbix-proxy-sqlite3 zabbix-selinux-policy zabbix-agent2
 dnf install -y zabbix-proxy-pgsql zabbix-sql-scripts zabbix-selinux-policy zabbix-agent2
 ```
 
-#### 4f. Zabbix Agent 2 (All Monitored Linux Hosts)
+#### 4i. Zabbix Agent 2 (All Monitored Linux Hosts)
 
 ```bash
 rpm -Uvh https://repo.zabbix.com/zabbix/7.0/rocky/9/x86_64/zabbix-release-latest-7.0.el9.noarch.rpm
@@ -383,6 +471,44 @@ setsebool -P httpd_can_connect_zabbix on
 setsebool -P httpd_can_network_connect_db on
 setsebool -P zabbix_can_network on
 ```
+
+### Firewalld Configuration
+
+Rocky Linux 9 ships with `firewalld` enabled. Open the required ports per VM role:
+
+```bash
+# --- Database VMs ---
+firewall-cmd --permanent --add-port=5432/tcp     # PostgreSQL
+firewall-cmd --permanent --add-port=6432/tcp     # PgBouncer (if co-located)
+firewall-cmd --permanent --add-port=8008/tcp     # Patroni REST API (KEMP health checks)
+
+# --- etcd VMs ---
+firewall-cmd --permanent --add-port=2379/tcp     # etcd client API
+firewall-cmd --permanent --add-port=2380/tcp     # etcd peer communication
+
+# --- Zabbix Server VMs ---
+firewall-cmd --permanent --add-port=10051/tcp    # Zabbix trapper (agent/proxy connections)
+
+# --- Frontend VMs ---
+firewall-cmd --permanent --add-port=80/tcp       # Nginx (backend for KEMP)
+firewall-cmd --permanent --add-port=443/tcp      # Nginx HTTPS (if not using KEMP SSL offload)
+
+# --- Proxy VMs ---
+firewall-cmd --permanent --add-port=10051/tcp    # Zabbix trapper (agent connections)
+firewall-cmd --permanent --add-port=10050/tcp    # Zabbix agent (self-monitoring)
+
+# --- SNMP Trap Proxy VMs ---
+firewall-cmd --permanent --add-port=162/udp      # SNMP traps inbound
+
+# --- All VMs (agent self-monitoring) ---
+firewall-cmd --permanent --add-port=10050/tcp    # Zabbix agent passive checks
+
+# Apply
+firewall-cmd --reload
+firewall-cmd --list-all
+```
+
+> **Note:** Only open the ports relevant to each VM's role. The commands above are grouped by role — do not run all of them on every VM.
 
 ### Frontend PHP-FPM Configuration
 
@@ -626,7 +752,7 @@ bootstrap:
 postgresql:
   listen: 0.0.0.0:5432
   connect_address: 10.1.1.20:5432
-  data_dir: /var/lib/postgresql/16/main
+  data_dir: /var/lib/pgsql/16/data
   authentication:
     replication:
       username: replicator
@@ -635,6 +761,59 @@ postgresql:
       username: postgres
       password: <secret>
 ```
+
+### Patroni Systemd Unit (`/etc/systemd/system/patroni.service`)
+
+```ini
+[Unit]
+Description=Patroni - PostgreSQL HA Cluster Manager
+Documentation=https://patroni.readthedocs.io
+After=network-online.target etcd.service
+Wants=network-online.target
+
+[Service]
+User=postgres
+Group=postgres
+Type=simple
+ExecStart=/usr/bin/patroni /etc/patroni/patroni.yml
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=process
+Restart=on-failure
+RestartSec=10s
+TimeoutSec=30
+LimitNOFILE=65536
+LimitNPROC=65536
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable patroni
+# Do NOT start yet -- start after Patroni config (patroni.yml) is in place
+```
+
+### PostgreSQL Client Authentication (`pg_hba.conf`)
+
+Patroni manages `pg_hba.conf` via its bootstrap config. Add the following to `patroni.yml` under `bootstrap.dcs.postgresql`:
+
+```yaml
+bootstrap:
+  dcs:
+    postgresql:
+      pg_hba:
+        - local   all         postgres                peer
+        - local   all         all                     md5
+        - host    all         zabbix    10.1.1.0/24   md5    # Site A Zabbix server/frontend
+        - host    all         zabbix    10.2.1.0/24   md5    # Site B Zabbix server/frontend
+        - host    all         zabbix    127.0.0.1/32  md5    # PgBouncer local connections
+        - host    replication replicator 10.1.1.20/32 md5    # Site A PG node
+        - host    replication replicator 10.2.1.20/32 md5    # Site B PG node
+        - host    all         all       127.0.0.1/32  md5    # Localhost
+```
+
+> **Important:** Patroni regenerates `pg_hba.conf` from this config on every restart. Do **not** edit `pg_hba.conf` directly — all changes must go through `patroni.yml` or `patronictl edit-config`.
 
 ### Synchronous vs. Asynchronous Replication
 
@@ -938,7 +1117,25 @@ Health Check:
 
 > **Note:** If you want each site's KEMP to prefer its local frontend, set the remote-site Real Server weight to 0 (backup only) or use **Fixed Weighted (Chained Failover)** scheduling.
 
-### Virtual Service 2: PostgreSQL Database (Layer 4 + Patroni Health Check)
+### Virtual Service 2: HTTP-to-HTTPS Redirect
+
+Create a Layer 7 Virtual Service on port 80 that redirects all traffic to HTTPS:
+
+```
+Virtual Service: Zabbix-Frontend-HTTP-Redirect
+  Virtual Address:     10.1.1.100       (KEMP shared VIP)
+  Port:                80
+  Protocol:            tcp
+  Add Content Rule:    "redirect to https"
+    Match Type:        Regex
+    Pattern:           /.*
+    Redirect URL:      https://zabbix.example.com
+    Redirect Code:     301
+```
+
+Alternatively, use the KEMP "Content Switching" rule or enable **"Add HTTP Redirect"** on the HTTPS Virtual Service, which automatically creates a port 80 listener that 301-redirects to the HTTPS service.
+
+### Virtual Service 3: PostgreSQL Database (Layer 4 + Patroni Health Check)
 
 Create a Layer 4 TCP Virtual Service that uses the Patroni REST API to find the current primary.
 
@@ -1753,6 +1950,7 @@ TLSServerCertSubject=CN=zabbix.example.com,O=YourOrg
 | Port | Protocol | Purpose |
 |------|----------|---------|
 | 5432/TCP | PostgreSQL | DB client connections |
+| 6432/TCP | PgBouncer | Connection pooler (if deployed) |
 | 2379/TCP | etcd | Client API (Patroni) |
 | 2380/TCP | etcd | Peer communication |
 | 8008/TCP | HTTP | Patroni REST API |
@@ -1781,9 +1979,32 @@ TLSServerCertSubject=CN=zabbix.example.com,O=YourOrg
 | Zabbix Server/Proxy | login.microsoftonline.com | 443/TCP | M365 OAuth |
 | K8s Proxy | Zabbix Server | 10051/TCP | K8s monitoring data |
 
+### SNMP Ports
+
+| Port | Protocol | Source | Destination | Purpose |
+|------|----------|--------|-------------|---------|
+| 161/UDP | SNMP | Proxy | Network device | SNMP polling |
+| 162/UDP | SNMP | Network device | Standalone trap proxy | SNMP traps (inbound) |
+
 ---
 
 ## 18. Backup & Disaster Recovery
+
+### Recovery Objectives
+
+Define these targets with stakeholders before deployment. The values below are achievable with this architecture:
+
+| Scenario | RPO (Data Loss) | RTO (Time to Recover) | Mechanism |
+|----------|------------------|-----------------------|-----------|
+| **Single server failure** (Zabbix Server HA) | 0 (no data loss) | 30-65 seconds | Automatic HA failover via `ha_node` table |
+| **Database failover** (Patroni, sync replication) | 0 (no data loss) | 15-30 seconds | Automatic Patroni promotion + KEMP re-route |
+| **Database failover** (Patroni, async replication) | < 5 seconds of data | 15-30 seconds | Automatic Patroni promotion + KEMP re-route |
+| **Full site loss** (Site A down, etcd quorum at Site B) | 0 / < 5s (sync/async) | 1-3 minutes | Automatic: etcd quorum + Patroni promote + Zabbix HA |
+| **Full site loss** (Site A down, no etcd quorum) | 0 / < 5s (sync/async) | 5-15 minutes | **Manual** `patronictl failover` + DNS update |
+| **Database corruption** (point-in-time recovery) | Minutes to hours | 30-60 minutes | pgBackRest PITR restore |
+| **Full environment rebuild** | Last backup age | 2-4 hours | pgBackRest full restore + config replay |
+
+> **Proxy buffering:** Even during a 1-3 minute server/DB failover, proxies buffer collected data locally (`ProxyOfflineBuffer=24h`). No metric data is lost during the gap — it is retroactively flushed once the server is available.
 
 ### Database Backup with pgBackRest
 
@@ -1809,7 +2030,7 @@ log-level-file=debug
 log-path=/var/log/pgbackrest
 
 [zabbix-cluster]
-pg1-path=/var/lib/postgresql/16/main
+pg1-path=/var/lib/pgsql/16/data
 pg1-port=5432
 pg1-user=postgres
 pg1-socket-path=/var/run/postgresql
@@ -1836,7 +2057,7 @@ repo1-retention-diff=7
 # ... same tuning params as above
 
 [zabbix-cluster]
-pg1-path=/var/lib/postgresql/16/main
+pg1-path=/var/lib/pgsql/16/data
 pg1-port=5432
 pg1-user=postgres
 pg1-socket-path=/var/run/postgresql
@@ -1887,6 +2108,44 @@ sudo -iu postgres pgbackrest --stanza=zabbix-cluster check
 ```bash
 sudo -iu postgres pgbackrest --stanza=zabbix-cluster info     # List backups
 sudo -iu postgres pgbackrest --stanza=zabbix-cluster verify   # Check integrity
+```
+
+### etcd Cluster Backup
+
+etcd stores Patroni cluster state (leader key, cluster config, member info). While etcd data can be rebuilt by restarting Patroni, having a snapshot accelerates recovery and preserves custom DCS configuration.
+
+```bash
+# Take a snapshot (run on any healthy etcd node)
+export ETCDCTL_API=3
+etcdctl snapshot save /var/lib/etcd/backup/etcd-snapshot-$(date +%Y%m%d).db \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/etcd/pki/ca.crt \
+  --cert=/etc/etcd/pki/server.crt \
+  --key=/etc/etcd/pki/server.key
+
+# Verify the snapshot
+etcdctl snapshot status /var/lib/etcd/backup/etcd-snapshot-$(date +%Y%m%d).db -w table
+```
+
+**Backup schedule (cron):**
+
+```cron
+# /etc/cron.d/etcd-backup
+# Daily etcd snapshot at 02:00, retain 7 days
+0 2 * * * etcd /usr/local/bin/etcdctl snapshot save /var/lib/etcd/backup/etcd-snapshot-$(date +\%Y\%m\%d).db --endpoints=https://127.0.0.1:2379 --cacert=/etc/etcd/pki/ca.crt --cert=/etc/etcd/pki/server.crt --key=/etc/etcd/pki/server.key 2>&1 | logger -t etcd-backup
+0 3 * * * etcd find /var/lib/etcd/backup/ -name "etcd-snapshot-*.db" -mtime +7 -delete
+```
+
+**Restore from snapshot (disaster recovery):**
+
+```bash
+# Stop etcd on all nodes, then restore on each node with its own config
+etcdctl snapshot restore /var/lib/etcd/backup/etcd-snapshot-20260223.db \
+  --name etcd-1 \
+  --initial-cluster "etcd-1=https://10.1.1.30:2380,etcd-2=https://10.2.1.30:2380,etcd-3=https://10.1.1.31:2380" \
+  --initial-advertise-peer-urls "https://10.1.1.30:2380" \
+  --data-dir=/var/lib/etcd
+# Start etcd on all nodes
 ```
 
 ### Zabbix Configuration File Backup
@@ -1973,7 +2232,7 @@ patronictl -c /etc/patroni/patroni.yml list
 # 2. Restore config files from backup
 # 3. Ensure patroni.yml has the same scope and etcd endpoints
 # 4. Ensure data directory is empty
-sudo -iu postgres rm -rf /var/lib/postgresql/16/main/*
+sudo -iu postgres rm -rf /var/lib/pgsql/16/data/*
 
 # 5. Start Patroni -- it auto-discovers the cluster and creates a replica
 systemctl start patroni
@@ -2098,6 +2357,54 @@ Set up these checks on an **independent system** (separate from Zabbix -- e.g., 
 - KEMP LoadMaster WUI accessibility (port 8443)
 - Certificate expiry for all TLS endpoints
 - M365 app registration secret expiry
+
+### Log Rotation
+
+Zabbix server, proxy, and agent logs can grow unbounded. Configure logrotate on all Zabbix VMs:
+
+**`/etc/logrotate.d/zabbix-server`** (Server VMs):
+```
+/var/log/zabbix/zabbix_server.log {
+    weekly
+    rotate 12
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 zabbix zabbix
+    postrotate
+        /usr/bin/zabbix_server -R log_level_increase= 2>/dev/null || true
+    endscript
+}
+```
+
+**`/etc/logrotate.d/zabbix-proxy`** (Proxy VMs):
+```
+/var/log/zabbix/zabbix_proxy.log {
+    weekly
+    rotate 12
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 zabbix zabbix
+}
+```
+
+**`/etc/logrotate.d/zabbix-agent2`** (All monitored hosts):
+```
+/var/log/zabbix/zabbix_agent2.log {
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 zabbix zabbix
+}
+```
+
+> **Note:** The `zabbix-server-pgsql` and `zabbix-proxy-*` packages on RHEL/Rocky typically install a logrotate config. Verify with `ls /etc/logrotate.d/zabbix*`. If present, review the defaults; if not, create the files above.
 
 ### History & Housekeeping
 
